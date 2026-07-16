@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "evalhistory"
+version = "0.1.0"
+description = "Store eval runs in Postgres and find out what got worse — a regression tracker for LLM evals."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Erik Hill", email = "erik.hill0987@gmail.com" }]
+keywords = ["evals", "regression", "fastapi", "postgres", "sqlalchemy", "llm"]
+classifiers = [
+  "Framework :: FastAPI",
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+]
+dependencies = [
+  "fastapi>=0.110",
+  "pydantic>=2.5",
+  "sqlalchemy>=2.0",
+  "psycopg[binary]>=3.1",
+  "uvicorn[standard]>=0.27",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "httpx>=0.27"]
+
+[project.urls]
+Homepage = "https://github.com/egnaro9/eval-history"
+
+[tool.setuptools]
+packages = ["evalhistory"]

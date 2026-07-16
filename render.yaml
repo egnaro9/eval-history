@@ -1,0 +1,28 @@
+# One-click deploy: https://render.com/deploy
+#
+# Free tier note, stated plainly because it matters to anyone clicking the live
+# link: the web service sleeps after inactivity and takes ~30s to wake. The
+# database does not sleep.
+services:
+  - type: web
+    name: eval-history
+    runtime: python
+    plan: free
+    buildCommand: pip install -e .
+    startCommand: uvicorn evalhistory.app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: eval-history-db
+          property: connectionString
+      - key: WRITE_KEYS
+        generateValue: true      # a random write key; reads stay open
+      - key: CORS_ORIGINS
+        value: https://egnaro9.github.io,http://localhost:3000
+
+databases:
+  - name: eval-history-db
+    plan: free
+    databaseName: evalhistory
+    user: eval

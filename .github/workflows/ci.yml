@@ -1,0 +1,78 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Fast path: no database needed, so the suite stays runnable anywhere.
+  sqlite:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Test (SQLite)
+        run: pytest -q
+
+  # The one that matters: the same suite against the database production uses.
+  # SQLite parity is an assumption; this is the check. Postgres enforces
+  # constraints and types SQLite is relaxed about, so a green SQLite run alone
+  # would not prove the deployed path works.
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: eval
+          POSTGRES_PASSWORD: eval
+          POSTGRES_DB: evalhistory
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Test against real Postgres
+        env:
+          DATABASE_URL: postgresql://eval:eval@localhost:5432/evalhistory
+        run: pytest -q
+      - name: Prove the schema round-trips on Postgres
+        env:
+          DATABASE_URL: postgresql://eval:eval@localhost:5432/evalhistory
+        run: |
+          python - <<'PY'
+          from sqlalchemy import inspect, text
+          from evalhistory.db import ENGINE, init_db
+          init_db()
+          insp = inspect(ENGINE)
+          tables = set(insp.get_table_names())
+          assert {"runs", "cases"} <= tables, tables
+          # The FK must exist at the DATABASE level, not just in the ORM.
+          fks = insp.get_foreign_keys("cases")
+          assert any(f["referred_table"] == "runs" for f in fks), fks
+          idx = {i["name"] for i in insp.get_indexes("runs")} | {i["name"] for i in insp.get_indexes("cases")}
+          assert {"ix_runs_created_at", "ix_cases_run_flagged"} <= idx, idx
+          with ENGINE.connect() as c:
+              c.execute(text("select 1"))
+          print(f"Postgres OK — tables={sorted(tables)} fks={len(fks)} indexes={len(idx)}")
+          PY

@@ -1,0 +1,200 @@
+"""The API.
+
+    POST /runs                  store an eval_run.json
+    GET  /runs                  list, newest first
+    GET  /runs/{id}             one run with its cases
+    GET  /runs/{a}/compare/{b}  what changed — the reason this exists
+    GET  /runs/latest/compare   the two most recent runs of a suite
+    DELETE /runs/{id}           (write key required)
+
+Writes need a key; reads are open. That asymmetry is deliberate: the point of
+publishing this is that anyone can look, and nobody can scribble on it.
+"""
+from __future__ import annotations
+
+import os
+from contextlib import asynccontextmanager
+from typing import AsyncIterator, List, Optional
+
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from . import __version__
+from .compare import CaseDelta, Comparison, compare_runs
+from .db import get_session, init_db
+from .models import Case, Run
+from .schemas import ComparisonOut, RunDetail, RunIn, RunSummary
+
+
+def _write_keys() -> set[str]:
+    return {k.strip() for k in os.environ.get("WRITE_KEYS", "dev-key").split(",") if k.strip()}
+
+
+def require_write_key(authorization: str = Header(default="")) -> str:
+    token = authorization.removeprefix("Bearer ").strip()
+    if token not in _write_keys():
+        raise HTTPException(status_code=401, detail="a write key is required")
+    return token
+
+
+def _run_to_dict(run: Run) -> dict:
+    """Back to the eval_run shape the comparer speaks."""
+    return {
+        "run": run.name,
+        "metrics": {
+            "faithfulness": run.faithfulness,
+            "precision@k": run.precision_at_k,
+            "recall@k": run.recall_at_k,
+            "citation_rate": run.citation_rate,
+            "flagged_cases": float(run.flagged_cases),
+            "n_cases": float(run.n_cases),
+        },
+        "cases": [
+            {
+                "q": c.q,
+                "flagged": c.flagged,
+                "scores": {
+                    "faithfulness": c.faithfulness,
+                    "precision@k": c.precision_at_k,
+                    "recall@k": c.recall_at_k,
+                    "citation": c.citation,
+                },
+            }
+            for c in run.cases
+        ],
+    }
+
+
+def _delta_out(d: CaseDelta) -> dict:
+    return {"q": d.q, "metric": d.metric, "before": d.before, "after": d.after, "delta": d.delta}
+
+
+def _comparison_out(c: Comparison) -> dict:
+    return {
+        "baseline": c.baseline, "candidate": c.candidate,
+        "verdict": c.verdict, "is_regression": c.is_regression,
+        "regressions": [_delta_out(d) for d in c.regressions],
+        "improvements": [_delta_out(d) for d in c.improvements],
+        "newly_flagged": c.newly_flagged, "newly_clean": c.newly_clean,
+        "added": c.added, "removed": c.removed, "metric_deltas": c.metric_deltas,
+    }
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    init_db()
+    yield
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="eval-history",
+        version=__version__,
+        summary="Store eval runs and find out what got worse.",
+        lifespan=lifespan,
+    )
+    # The dashboard is a static site on another origin.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[o.strip() for o in os.environ.get(
+            "CORS_ORIGINS", "https://egnaro9.github.io,http://localhost:3000"
+        ).split(",")],
+        allow_methods=["GET", "POST", "DELETE"],
+        allow_headers=["*"],
+    )
+
+    @app.get("/health")
+    def health() -> dict:
+        return {"status": "ok", "version": __version__}
+
+    @app.post("/runs", response_model=RunSummary, status_code=201)
+    def create_run(
+        payload: RunIn,
+        db: Session = Depends(get_session),
+        _key: str = Depends(require_write_key),
+    ) -> Run:
+        m = payload.metrics
+        run = Run(
+            name=payload.run,
+            git_sha=payload.git_sha,
+            label=payload.label,
+            faithfulness=m.faithfulness,
+            precision_at_k=m.precision_at_k,
+            recall_at_k=m.recall_at_k,
+            citation_rate=m.citation_rate,
+            flagged_cases=int(m.flagged_cases),
+            n_cases=int(m.n_cases),
+        )
+        for c in payload.cases:
+            run.cases.append(
+                Case(
+                    q=c.q, answer=c.answer, note=c.note,
+                    retrieved=c.retrieved, citations=c.citations,
+                    faithfulness=c.scores.faithfulness,
+                    precision_at_k=c.scores.precision_at_k,
+                    recall_at_k=c.scores.recall_at_k,
+                    citation=c.scores.citation,
+                    flagged=c.flagged,
+                )
+            )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        return run
+
+    @app.get("/runs", response_model=List[RunSummary])
+    def list_runs(
+        name: Optional[str] = Query(None, description="only this suite"),
+        limit: int = Query(20, ge=1, le=100),
+        offset: int = Query(0, ge=0),
+        db: Session = Depends(get_session),
+    ) -> List[Run]:
+        stmt = select(Run).order_by(Run.created_at.desc()).limit(limit).offset(offset)
+        if name:
+            stmt = stmt.where(Run.name == name)
+        return list(db.scalars(stmt))
+
+    @app.get("/runs/{run_id}", response_model=RunDetail)
+    def get_run(run_id: str, db: Session = Depends(get_session)) -> Run:
+        run = db.get(Run, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="no such run")
+        return run
+
+    @app.get("/runs/{a}/compare/{b}", response_model=ComparisonOut)
+    def compare(a: str, b: str, db: Session = Depends(get_session)) -> dict:
+        """What changed between two runs. `a` is the baseline."""
+        ra, rb = db.get(Run, a), db.get(Run, b)
+        if ra is None or rb is None:
+            raise HTTPException(status_code=404, detail="no such run")
+        return _comparison_out(compare_runs(_run_to_dict(ra), _run_to_dict(rb)))
+
+    @app.get("/suites/{name}/latest-comparison", response_model=ComparisonOut)
+    def latest_comparison(name: str, db: Session = Depends(get_session)) -> dict:
+        """The two most recent runs of a suite — the CI-friendly shortcut."""
+        runs = list(db.scalars(
+            select(Run).where(Run.name == name).order_by(Run.created_at.desc()).limit(2)
+        ))
+        if len(runs) < 2:
+            raise HTTPException(status_code=404, detail="need at least two runs of this suite")
+        newest, previous = runs[0], runs[1]
+        return _comparison_out(compare_runs(_run_to_dict(previous), _run_to_dict(newest)))
+
+    @app.delete("/runs/{run_id}", status_code=204)
+    def delete_run(
+        run_id: str,
+        db: Session = Depends(get_session),
+        _key: str = Depends(require_write_key),
+    ) -> None:
+        run = db.get(Run, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="no such run")
+        db.delete(run)   # cases cascade
+        db.commit()
+
+    return app
+
+
+app = create_app()
