@@ -2,14 +2,31 @@ import pytest
 from fastapi.testclient import TestClient
 
 from evalhistory.app import create_app
-from evalhistory.db import init_db
+from evalhistory.db import ENGINE, init_db
+from evalhistory.models import Base
+
+
+@pytest.fixture(autouse=True)
+def clean_db():
+    """A fresh schema per test.
+
+    Without this the tests share one database and quietly depend on rows left
+    behind by whoever ran first — they passed only because the ordering
+    happened to suit them. That's fine until the backend changes, the order
+    changes, or someone runs a single test. A test that needs its neighbours is
+    not a test.
+
+    Same reset on SQLite and Postgres, so a green local run means something
+    about the deployed one.
+    """
+    Base.metadata.drop_all(ENGINE)
+    init_db()
+    yield
+    Base.metadata.drop_all(ENGINE)
 
 
 @pytest.fixture
-def client(monkeypatch):
-    # SQLite in memory — the suite runs with no database installed and no network.
-    # The models, queries and constraints are the same ones Postgres sees.
-    init_db()
+def client():
     return TestClient(create_app())
 
 
