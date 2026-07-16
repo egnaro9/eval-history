@@ -81,9 +81,18 @@ Two tables, one relationship: a run has many cases. [`models.py`](evalhistory/mo
 
 ## Deploy
 
-`render.yaml` is a one-click blueprint — web service + Postgres, health check, generated write key.
+`render.yaml` is a Render blueprint — web service, health check, generated write key. Point `DATABASE_URL` at any Postgres.
 
-**Honest note about the live link:** on the free tier the web service sleeps after inactivity and takes **~30s to wake**. The database doesn't sleep. That's a cost of free hosting, not a bug, and it's better said out loud than hidden behind a mystery spinner.
+**Two honest notes about free hosting**, because anyone clicking a live link deserves them:
+
+- The **database is deliberately not declared in the blueprint.** Render's free Postgres is *deleted after 30 days* — a portfolio link that dies in a month is worse than no link. So the database lives on [Neon](https://neon.tech)'s free tier (permanent) and Render just holds the connection string.
+- The **web service sleeps** after ~15 minutes idle and takes **~30s to wake**. That's the cost of free, and it's better said out loud than hidden behind a mystery spinner.
+
+```bash
+# any Postgres works — Neon, Supabase, RDS, or local
+export DATABASE_URL="postgresql://user:pass@host/db"
+uvicorn evalhistory.app:app
+```
 
 ## Layout
 

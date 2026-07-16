@@ -1,8 +1,12 @@
-# One-click deploy: https://render.com/deploy
+# Deploy: Render (web) + Neon (Postgres).
 #
-# Free tier note, stated plainly because it matters to anyone clicking the live
-# link: the web service sleeps after inactivity and takes ~30s to wake. The
-# database does not sleep.
+# Why the database isn't declared here: Render's free Postgres is DELETED after
+# 30 days. A portfolio link that dies in a month is worse than no link, so the
+# database lives on Neon's free tier (permanent) and Render just holds its URL.
+#
+# Free-tier honesty, stated because anyone clicking the live link deserves it:
+# the web service sleeps after ~15 min idle and takes ~30s to wake. The Neon
+# database does not expire.
 services:
   - type: web
     name: eval-history
@@ -13,16 +17,8 @@ services:
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
-        fromDatabase:
-          name: eval-history-db
-          property: connectionString
+        sync: false            # paste the Neon connection string in the dashboard
       - key: WRITE_KEYS
-        generateValue: true      # a random write key; reads stay open
+        generateValue: true    # a random write key; reads stay open
       - key: CORS_ORIGINS
         value: https://egnaro9.github.io,http://localhost:3000
-
-databases:
-  - name: eval-history-db
-    plan: free
-    databaseName: evalhistory
-    user: eval
