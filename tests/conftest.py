@@ -35,7 +35,19 @@ def auth():
     return {"Authorization": "Bearer dev-key"}
 
 
-def make_run(name="rag-eval-lab", faithfulness=1.0, flagged=False, extra_cases=None):
+@pytest.fixture
+def make_run():
+    """Factory fixture for an eval_run.json payload.
+
+    A fixture rather than an importable helper: `from tests.conftest import ...`
+    only resolves when the rootdir happens to be on sys.path, which is true for
+    `python -m pytest` (it adds cwd) and false for bare `pytest`. CI runs the
+    latter.
+    """
+    return _make_run
+
+
+def _make_run(name="rag-eval-lab", faithfulness=1.0, flagged=False, extra_cases=None):
     cases = [
         {"q": "Which planet is the hottest?", "answer": "Venus is the hottest.",
          "retrieved": ["venus#0"], "citations": ["venus#0"],
