@@ -77,6 +77,8 @@ Two tables, one relationship: a run has many cases. [`models.py`](evalhistory/mo
 
 **Postgres in production, SQLite in tests** — same models, same queries, same constraints. That keeps the suite runnable with no database installed, and **CI runs the entire suite a second time against a real Postgres 16 service container**, because SQLite parity is an assumption and the Postgres run is the check. It also asserts the FK and the indexes exist *at the database level*, not just in the ORM.
 
+> **Force IPv4.** Managed Postgres hostnames publish AAAA records, and plenty of hosts — Render's free tier included — have no IPv6 egress. libpq picks the AAAA, the packet has nowhere to go, and you get `Network is unreachable` from an address that looks perfectly valid. `db.py` resolves the A record and passes `hostaddr` (keeping `host` for TLS), per-connection rather than once at startup, since a managed provider's IP can move under you. It only cost an hour because the traceback named an IPv6 address — the tell was right there in `2600:1f10:…`.
+
 > One bug that caught: SQLite ships with foreign keys **off**. The cascade test passed on the ORM's cascade while Postgres would have been enforcing the real constraint — green locally, and a genuinely untested constraint in production. `db.py` now turns the pragma on so the test database enforces what Postgres enforces.
 
 ## Deploy

@@ -12,6 +12,7 @@ Set DATABASE_URL to point at Postgres:
 from __future__ import annotations
 
 import os
+import socket
 from contextlib import contextmanager
 from typing import Iterator
 
@@ -50,6 +51,30 @@ def make_engine(url: str | None = None):
         # instance drops sockets — recycle and pre-ping rather than serving 500s.
         kwargs.update(pool_size=5, max_overflow=5, pool_pre_ping=True, pool_recycle=300)
     engine = create_engine(url, **kwargs)
+
+    if not url.startswith("sqlite"):
+        # Force IPv4.
+        #
+        # Managed Postgres hostnames (Neon, Supabase, …) publish AAAA records,
+        # and plenty of hosts — Render's free tier among them — have no IPv6
+        # egress at all. libpq picks the AAAA, the packet has nowhere to go, and
+        # you get "Network is unreachable" from an address that looks fine.
+        #
+        # Resolving the A record and passing `hostaddr` makes libpq dial IPv4
+        # while `host` still carries the name for TLS/SNI. Done per-connection
+        # rather than once at startup, because a managed provider's IP can move
+        # under you and a cached one would fail on the next reconnect.
+        @event.listens_for(engine, "do_connect")
+        def _prefer_ipv4(dialect, conn_rec, cargs, cparams):  # pragma: no cover - needs a real host
+            host = cparams.get("host")
+            if not host or cparams.get("hostaddr"):
+                return
+            try:
+                info = socket.getaddrinfo(host, None, socket.AF_INET, socket.SOCK_STREAM)
+            except socket.gaierror:
+                return          # no A record — let libpq try whatever it finds
+            if info:
+                cparams["hostaddr"] = info[0][4][0]
 
     if url.startswith("sqlite"):
         # SQLite ships with foreign keys OFF. Without this the test database
