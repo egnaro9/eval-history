@@ -31,9 +31,17 @@ jobs:
   # would not prove the deployed path works.
   postgres:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 16 is a common managed default; 18 is what the deployed instance runs.
+        # Testing the version production uses is the whole point — otherwise
+        # "green on 16, deployed on 18" is an assumption, not a check.
+        pg: ["16", "18"]
+    name: postgres ${{ matrix.pg }}
     services:
       postgres:
-        image: postgres:16
+        image: postgres:${{ matrix.pg }}
         env:
           POSTGRES_USER: eval
           POSTGRES_PASSWORD: eval
