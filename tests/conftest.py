@@ -47,7 +47,8 @@ def make_run():
     return _make_run
 
 
-def _make_run(name="rag-eval-lab", faithfulness=1.0, flagged=False, extra_cases=None):
+def _make_run(name="rag-eval-lab", faithfulness=1.0, flagged=False, extra_cases=None,
+              label=None, git_sha=None):
     cases = [
         {"q": "Which planet is the hottest?", "answer": "Venus is the hottest.",
          "retrieved": ["venus#0"], "citations": ["venus#0"],
@@ -63,6 +64,8 @@ def _make_run(name="rag-eval-lab", faithfulness=1.0, flagged=False, extra_cases=
     n = len(cases)
     return {
         "run": name,
+        "label": label,
+        "git_sha": git_sha,
         "metrics": {
             "faithfulness": sum(c["scores"]["faithfulness"] for c in cases) / n,
             "precision@k": 1.0, "recall@k": 1.0, "citation_rate": 1.0,

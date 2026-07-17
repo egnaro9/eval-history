@@ -75,6 +75,33 @@ def test_compare_two_stored_runs(client, auth, make_run):
     assert c["regressions"][0]["delta"] == -0.7
 
 
+def test_compare_says_which_runs_it_compared(client, auth, make_run):
+    """A verdict nobody can trace back to two runs is not worth returning.
+
+    Both sides of an interesting comparison are normally the same suite, so the
+    suite name alone can't identify them — the ids are what makes a verdict
+    checkable, and the labels are what makes it readable.
+    """
+    a = post(client, auth, make_run, name="ci", label="k=3", git_sha="aaa111", faithfulness=1.0)
+    b = post(client, auth, make_run, name="ci", label="k=2", git_sha="bbb222", faithfulness=0.3)
+    c = client.get(f"/runs/{a['id']}/compare/{b['id']}").json()
+
+    assert c["baseline"]["id"] == a["id"] and c["candidate"]["id"] == b["id"]
+    assert (c["baseline"]["label"], c["candidate"]["label"]) == ("k=3", "k=2")
+    assert (c["baseline"]["git_sha"], c["candidate"]["git_sha"]) == ("aaa111", "bbb222")
+
+
+def test_latest_comparison_names_the_two_runs_it_picked(client, auth, make_run):
+    """The endpoint picks the runs itself, so it has to say which it picked."""
+    old = post(client, auth, make_run, name="ci", label="before", faithfulness=1.0)
+    new = post(client, auth, make_run, name="ci", label="after", faithfulness=0.4)
+    _ = post(client, auth, make_run, name="other", label="unrelated")   # must be ignored
+
+    c = client.get("/suites/ci/latest-comparison").json()
+    assert c["baseline"]["id"] == old["id"], "baseline must be the older run"
+    assert c["candidate"]["id"] == new["id"], "candidate must be the newer run"
+
+
 def test_compare_404s_on_unknown_run(client, auth, make_run):
     a = post(client, auth, make_run)
     assert client.get(f"/runs/{a['id']}/compare/nope").status_code == 404

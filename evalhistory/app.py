@@ -71,9 +71,14 @@ def _delta_out(d: CaseDelta) -> dict:
     return {"q": d.q, "metric": d.metric, "before": d.before, "after": d.after, "delta": d.delta}
 
 
-def _comparison_out(c: Comparison) -> dict:
+def _comparison_out(c: Comparison, baseline: Run, candidate: Run) -> dict:
+    """`compare_runs` works on eval_run dicts, which only carry a suite name.
+
+    The runs themselves are what the caller needs to identify a verdict, so the
+    identity is attached here rather than smuggled into the pure comparer.
+    """
     return {
-        "baseline": c.baseline, "candidate": c.candidate,
+        "baseline": baseline, "candidate": candidate,
         "verdict": c.verdict, "is_regression": c.is_regression,
         "regressions": [_delta_out(d) for d in c.regressions],
         "improvements": [_delta_out(d) for d in c.improvements],
@@ -169,7 +174,7 @@ def create_app() -> FastAPI:
         ra, rb = db.get(Run, a), db.get(Run, b)
         if ra is None or rb is None:
             raise HTTPException(status_code=404, detail="no such run")
-        return _comparison_out(compare_runs(_run_to_dict(ra), _run_to_dict(rb)))
+        return _comparison_out(compare_runs(_run_to_dict(ra), _run_to_dict(rb)), ra, rb)
 
     @app.get("/suites/{name}/latest-comparison", response_model=ComparisonOut)
     def latest_comparison(name: str, db: Session = Depends(get_session)) -> dict:
@@ -180,7 +185,9 @@ def create_app() -> FastAPI:
         if len(runs) < 2:
             raise HTTPException(status_code=404, detail="need at least two runs of this suite")
         newest, previous = runs[0], runs[1]
-        return _comparison_out(compare_runs(_run_to_dict(previous), _run_to_dict(newest)))
+        return _comparison_out(
+            compare_runs(_run_to_dict(previous), _run_to_dict(newest)), previous, newest
+        )
 
     @app.delete("/runs/{run_id}", status_code=204)
     def delete_run(

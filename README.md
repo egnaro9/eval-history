@@ -43,6 +43,7 @@ Three decisions in there worth defending:
 - **A tolerance band.** Float scores wobble in the last decimal. Without a band, every run "regresses" and the signal drowns in noise.
 - **Newly-flagged outranks a metric dip.** A case crossing the hallucination threshold is a *behaviour change*, not a rounding error — so it decides the verdict even when the numbers look flat.
 - **Cases match on question text, not position or id.** Ids aren't stable across runs, and a reordered suite isn't a changed one. Questions that appear or vanish are reported **separately** rather than silently scored — a vanished case is a change to the *suite*, not evidence about the system.
+- **A verdict says which two runs produced it.** Both sides of an interesting comparison are usually the *same suite*, so the name can't identify them — `baseline` and `candidate` carry the run id, label and git sha. A verdict you can't trace back to two commits isn't evidence, it's a rumour.
 
 ## Run it
 

@@ -95,9 +95,26 @@ class DeltaOut(BaseModel):
     delta: float
 
 
+class RunRef(BaseModel):
+    """Which run, exactly.
+
+    A comparison that says only "rag-eval-lab vs rag-eval-lab" is unreadable —
+    both sides of an interesting comparison are usually the same suite. The
+    identity lives here so a verdict can be traced back to two specific runs
+    and the commits behind them.
+    """
+    id: str
+    name: str
+    label: Optional[str] = None
+    git_sha: Optional[str] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class ComparisonOut(BaseModel):
-    baseline: str
-    candidate: str
+    baseline: RunRef
+    candidate: RunRef
     verdict: str
     is_regression: bool
     regressions: List[DeltaOut] = []
