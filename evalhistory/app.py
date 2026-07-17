@@ -138,9 +138,10 @@ def create_app() -> FastAPI:
             flagged_cases=int(m.flagged_cases),
             n_cases=int(m.n_cases),
         )
-        for c in payload.cases:
+        for i, c in enumerate(payload.cases):
             run.cases.append(
                 Case(
+                    ordinal=i,
                     q=c.q, answer=c.answer, note=c.note,
                     retrieved=c.retrieved, citations=c.citations,
                     faithfulness=c.scores.faithfulness,
@@ -173,6 +174,21 @@ def create_app() -> FastAPI:
         if run is None:
             raise HTTPException(status_code=404, detail="no such run")
         return run
+
+    @app.get("/runs/{run_id}/eval_run")
+    def get_run_as_eval_run(run_id: str, db: Session = Depends(get_session)) -> dict:
+        """The run in the exact shape it arrived in.
+
+        `POST /runs` takes rag-eval-lab's eval_run.json verbatim; this hands the
+        same shape back. Consumers that already understand eval_run.json — the
+        dashboard, a notebook, whatever produced it — need no adapter, and the
+        storage layout stays free to be a normalised schema rather than a
+        wire format leaked into the database.
+        """
+        run = db.get(Run, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="no such run")
+        return _run_to_dict(run)
 
     @app.get("/runs/{a}/compare/{b}", response_model=ComparisonOut)
     def compare(a: str, b: str, db: Session = Depends(get_session)) -> dict:

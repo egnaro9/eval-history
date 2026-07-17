@@ -57,7 +57,14 @@ class Run(Base):
     n_cases: Mapped[int] = mapped_column(Integer, nullable=False)
 
     cases: Mapped[List["Case"]] = relationship(
-        back_populates="run", cascade="all, delete-orphan", lazy="selectin"
+        back_populates="run",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        # Without this the database returns cases in whatever order it likes,
+        # and a suite read back is not the suite that was stored. Ids are random
+        # uuids, so there is nothing else to order by — the position has to be
+        # recorded when it's still known.
+        order_by="Case.ordinal",
     )
 
     __table_args__ = (
@@ -77,6 +84,10 @@ class Case(Base):
     run_id: Mapped[str] = mapped_column(
         ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
     )
+
+    # Position within the run, as submitted. A suite has an order its author
+    # chose, and "read it back" has to mean the same list, not the same set.
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
     q: Mapped[str] = mapped_column(Text, nullable=False)
     answer: Mapped[str] = mapped_column(Text, nullable=False)

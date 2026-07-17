@@ -75,6 +75,30 @@ def test_compare_two_stored_runs(client, auth, make_run):
     assert c["regressions"][0]["delta"] == -0.7
 
 
+def test_a_run_comes_back_in_the_shape_it_went_in(client, auth, make_run):
+    """POST eval_run.json, GET eval_run.json — no adapter needed downstream.
+
+    The database stores metrics as columns, not as the wire format. That's the
+    right call for querying and the wrong thing to make every consumer learn,
+    so the round trip has to actually hold.
+    """
+    payload = make_run(name="ci", faithfulness=0.75, flagged=True)
+    stored = post(client, auth, make_run, name="ci", faithfulness=0.75, flagged=True)
+
+    got = client.get(f"/runs/{stored['id']}/eval_run").json()
+
+    assert got["run"] == payload["run"]
+    assert got["metrics"]["faithfulness"] == payload["metrics"]["faithfulness"]
+    assert set(got["metrics"]) == set(payload["metrics"]), "metric keys must survive the round trip"
+    assert [c["q"] for c in got["cases"]] == [c["q"] for c in payload["cases"]]
+    assert got["cases"][0]["scores"]["precision@k"] == payload["cases"][0]["scores"]["precision@k"]
+    assert got["cases"][0]["flagged"] == payload["cases"][0]["flagged"]
+
+
+def test_eval_run_shape_404s_on_unknown_run(client, auth):
+    assert client.get("/runs/nope/eval_run").status_code == 404
+
+
 def test_compare_says_which_runs_it_compared(client, auth, make_run):
     """A verdict nobody can trace back to two runs is not worth returning.
 
