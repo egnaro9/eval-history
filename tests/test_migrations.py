@@ -20,6 +20,7 @@ import os
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.engine import make_url
 
 from evalhistory.db import normalize_url
 from evalhistory.models import Base
@@ -31,14 +32,19 @@ pytestmark = pytest.mark.skipif(
 
 
 def _fresh_db(url: str, name: str):
-    """A throwaway database, so neither path sees the other's leftovers."""
-    admin = create_engine(normalize_url(url), isolation_level="AUTOCOMMIT")
+    """A throwaway database, so neither path sees the other's leftovers.
+
+    make_url rather than string surgery: a DSN can carry the database name in a
+    query parameter (`?host=/tmp`), and splitting on the last "/" picks the
+    wrong one — which silently pointed both databases at the same place.
+    """
+    base = make_url(normalize_url(url))
+    admin = create_engine(base, isolation_level="AUTOCOMMIT")
     with admin.connect() as c:
         c.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
         c.execute(text(f'CREATE DATABASE "{name}"'))
     admin.dispose()
-    base, _, _ = normalize_url(url).rpartition("/")
-    return create_engine(f"{base}/{name}")
+    return create_engine(base.set(database=name))
 
 
 def _schema(engine) -> dict:
@@ -72,10 +78,18 @@ def test_migrations_produce_exactly_what_the_models_describe():
     url = os.environ["DATABASE_URL"]
 
     # Path A: what a fresh deploy gets, by running every migration.
+    #
+    # env.py reads DATABASE_URL itself and overwrites sqlalchemy.url — that's
+    # deliberate (a migration can't be aimed at a database the app isn't using),
+    # so redirecting it means setting the variable it reads, not the config it
+    # ignores.
     migrated = _fresh_db(url, "evalhistory_migrated")
-    cfg = _alembic_config()
-    cfg.set_main_option("sqlalchemy.url", str(migrated.url.render_as_string(hide_password=False)).replace("%", "%%"))
-    command.upgrade(cfg, "head")
+    prior = os.environ["DATABASE_URL"]
+    try:
+        os.environ["DATABASE_URL"] = migrated.url.render_as_string(hide_password=False)
+        command.upgrade(_alembic_config(), "head")
+    finally:
+        os.environ["DATABASE_URL"] = prior
 
     # Path B: what the models say, straight from metadata.
     modelled = _fresh_db(url, "evalhistory_modelled")

@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from . import __version__
 from .compare import CaseDelta, Comparison, compare_runs
-from .db import get_session, init_db
+from .db import get_session
 from .models import Case, Run
 from .schemas import ComparisonOut, RunDetail, RunIn, RunSummary
 

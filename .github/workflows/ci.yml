@@ -72,14 +72,17 @@ jobs:
         env:
           DATABASE_URL: postgresql://eval:eval@localhost:5432/evalhistory
         run: pytest -q -rA --tb=short
-      - name: Prove the schema round-trips on Postgres
+      - name: Prove the schema production gets — built by migrations — is right
         env:
           DATABASE_URL: postgresql://eval:eval@localhost:5432/evalhistory
         run: |
           python - <<'PY'
           from sqlalchemy import inspect, text
-          from evalhistory.db import ENGINE, init_db
-          init_db()
+          from evalhistory.db import ENGINE
+          from evalhistory.migrate import ensure_schema
+          # Deliberately not create_all(): production's schema comes from
+          # Alembic, so that is the path worth asserting on.
+          print("schema:", ensure_schema(ENGINE))
           insp = inspect(ENGINE)
           tables = set(insp.get_table_names())
           assert {"runs", "cases"} <= tables, tables

@@ -3,7 +3,7 @@
 [![ci](https://github.com/egnaro9/eval-history/actions/workflows/ci.yml/badge.svg)](https://github.com/egnaro9/eval-history/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](https://www.python.org/)
 [![Postgres](https://img.shields.io/badge/Postgres-16-336791)](https://www.postgresql.org/)
-[![tests](https://img.shields.io/badge/tests-30-brightgreen)](tests)
+[![tests](https://img.shields.io/badge/tests-33-brightgreen)](tests)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 **Store eval runs in Postgres and find out what got worse.**
@@ -50,7 +50,7 @@ Three decisions in there worth defending:
 ```bash
 git clone https://github.com/egnaro9/eval-history && cd eval-history
 pip install -e ".[dev]"
-pytest -q                    # 30 tests, no database required
+pytest -q                    # 32 tests, no database required
 uvicorn evalhistory.app:app --reload
 ```
 
@@ -77,6 +77,14 @@ Two tables, one relationship: a run has many cases. [`models.py`](evalhistory/mo
 - `ON DELETE CASCADE` on the FK, so deleting a run can't leak orphaned cases.
 
 **Postgres in production, SQLite in tests** — same models, same queries, same constraints. That keeps the suite runnable with no database installed, and **CI runs the entire suite a second time against a real Postgres 16 service container**, because SQLite parity is an assumption and the Postgres run is the check. It also asserts the FK and the indexes exist *at the database level*, not just in the ORM.
+
+## Migrations, and the test that makes them mean anything
+
+Schema changes go through **Alembic**; production's schema is whatever the migrations built, and [`migrations/env.py`](migrations/env.py) reads `DATABASE_URL` through the app's own normaliser rather than `alembic.ini`, so a migration can't be aimed at a database the app isn't using.
+
+The part worth stealing is [`tests/test_migrations.py`](tests/test_migrations.py): it builds one database **by running every migration**, another **from the models**, and diffs the resulting schemas — columns, types, nullability, indexes, primary keys, and the FK's `ON DELETE`. Add a column without a migration and CI goes red. Without that check, a model change with no migration is green locally and a 500 in production on a column Postgres has never heard of.
+
+It also earns something subtler. The deployed database predates Alembic — it was built by `create_all()` and has real rows in it — so `ensure_schema` **stamps** it rather than migrating it, which is a claim that the schema it already has is the one the migration would have produced. The drift test is what makes that claim true instead of hopeful.
 
 > **The scary error wasn't the bug.** The first deploy crash-looped with `connection to server at "2600:1f10:…" failed: Network is unreachable` — Neon publishes AAAA records, Render's free tier has no IPv6 egress. So I wrote a `do_connect` hook to resolve the A record and pin `hostaddr` to IPv4. It worked, and it changed nothing: the service still crash-looped. Further down the *same* error, past the IPv6 noise, was an IPv4 address reporting `password authentication failed` — psycopg had been trying every resolved address and falling through to IPv4 on its own the whole time. The real fault was a connection string copied out of a dashboard while the password was still masked: structurally perfect, `**********` where the secret goes. **The IPv4 hook has since been deleted** — it fixed nothing, and code kept to justify the hour that produced it is how a codebase rots. The lesson worth keeping is that I spent that hour on the alarming line instead of the accurate one.
 
@@ -106,7 +114,10 @@ evalhistory/
   db.py        engine/session; Postgres or SQLite; url normalisation
   schemas.py   Pydantic contract — accepts eval_run.json verbatim
   app.py       FastAPI: routes, auth, CORS, lifespan
-tests/         30 tests — comparison logic, API, auth, validation, cascade
+  migrate.py   schema at startup: Alembic on Postgres, create_all on SQLite
+tests/         33 tests — comparison logic, API, auth, validation, cascade,
+               migration/model drift (the drift test needs Postgres; it skips
+               on SQLite rather than pretending to check)
 ```
 
 ---
