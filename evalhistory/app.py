@@ -89,7 +89,13 @@ def _comparison_out(c: Comparison, baseline: Run, candidate: Run) -> dict:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    init_db()
+    # Migrations run here rather than in a release phase because the free tier
+    # has no release phase and runs a single instance. With more than one
+    # instance this races and belongs in a pre-deploy step instead.
+    from .db import ENGINE
+    from .migrate import ensure_schema
+
+    print(f"schema: {ensure_schema(ENGINE)}", flush=True)
     yield
 
 
