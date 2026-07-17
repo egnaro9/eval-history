@@ -25,6 +25,21 @@ def clean_db():
     Base.metadata.drop_all(ENGINE)
 
 
+TEST_KEY = "test-key"
+
+
+@pytest.fixture(autouse=True)
+def write_key(monkeypatch):
+    """Configure a write key, the way a real deploy has to.
+
+    WRITE_KEYS has no default — unset means no key is valid. The suite used to
+    lean on a "dev-key" default, which meant the tests were only green because
+    the service shipped with a credential printed in its own README. Setting it
+    explicitly here keeps the tests honest about what deploying requires.
+    """
+    monkeypatch.setenv("WRITE_KEYS", TEST_KEY)
+
+
 @pytest.fixture
 def client():
     return TestClient(create_app())
@@ -32,7 +47,7 @@ def client():
 
 @pytest.fixture
 def auth():
-    return {"Authorization": "Bearer dev-key"}
+    return {"Authorization": f"Bearer {TEST_KEY}"}
 
 
 @pytest.fixture
@@ -48,7 +63,7 @@ def make_run():
 
 
 def _make_run(name="rag-eval-lab", faithfulness=1.0, flagged=False, extra_cases=None,
-              label=None, git_sha=None):
+              label=None, git_sha=None, source=None):
     cases = [
         {"q": "Which planet is the hottest?", "answer": "Venus is the hottest.",
          "retrieved": ["venus#0"], "citations": ["venus#0"],
@@ -66,6 +81,7 @@ def _make_run(name="rag-eval-lab", faithfulness=1.0, flagged=False, extra_cases=
         "run": name,
         "label": label,
         "git_sha": git_sha,
+        **({"source": source} if source else {}),
         "metrics": {
             "faithfulness": sum(c["scores"]["faithfulness"] for c in cases) / n,
             "precision@k": 1.0, "recall@k": 1.0, "citation_rate": 1.0,

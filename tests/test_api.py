@@ -1,4 +1,7 @@
 """The API, exercised against a real database — real SQL, real FK cascade."""
+from fastapi.testclient import TestClient
+
+from evalhistory.app import create_app
 
 
 def post(client, auth, make_run, **kw):
@@ -75,6 +78,27 @@ def test_compare_two_stored_runs(client, auth, make_run):
     assert c["regressions"][0]["delta"] == -0.7
 
 
+def test_unset_write_keys_locks_the_door(monkeypatch, make_run):
+    """No configured key means no writes — not "the documented default works".
+
+    This defaulted to "dev-key", so a deploy that forgot to set WRITE_KEYS
+    accepted a credential printed in this repo's README. Anyone could write.
+    """
+    monkeypatch.delenv("WRITE_KEYS", raising=False)
+    c = TestClient(create_app())
+    for headers in ({}, {"Authorization": "Bearer dev-key"}, {"Authorization": "Bearer "}):
+        r = c.post("/runs", json=make_run(), headers=headers)
+        assert r.status_code == 401, f"{headers} got in with no keys configured"
+
+
+def test_blank_write_keys_locks_the_door(monkeypatch, make_run):
+    """Empty and whitespace-only config must not produce a usable empty key."""
+    monkeypatch.setenv("WRITE_KEYS", " , ,")
+    c = TestClient(create_app())
+    assert c.post("/runs", json=make_run(), headers={"Authorization": "Bearer "}).status_code == 401
+    assert c.post("/runs", json=make_run(), headers={"Authorization": "Bearer  "}).status_code == 401
+
+
 def test_a_run_comes_back_in_the_shape_it_went_in(client, auth, make_run):
     """POST eval_run.json, GET eval_run.json — no adapter needed downstream.
 
@@ -136,6 +160,46 @@ def test_latest_comparison_for_a_suite(client, auth, make_run):
     post(client, auth, make_run, name="ci", faithfulness=0.4)      # newest
     c = client.get("/suites/ci/latest-comparison").json()
     assert c["is_regression"]           # baseline = previous, candidate = newest
+
+
+def test_latest_comparison_ignores_ablations(client, auth, make_run):
+    """An ablation is real data and the wrong answer to "what did this push break?"
+
+    This was live: a seeded k=3/k=2 sweep sat next to a genuine CI run, so the
+    endpoint compared a config change against a commit and returned `regressed`
+    with five precision drops — blaming them on whoever pushed. The numbers were
+    right; the question was wrong.
+    """
+    old = post(client, auth, make_run, name="ci", label="commit A", faithfulness=1.0)
+    new = post(client, auth, make_run, name="ci", label="commit B", faithfulness=0.9)
+    # Posted last, so newest by wall clock — the ordering that caused the bug.
+    post(client, auth, make_run, name="ci", label="retrieval k=2", faithfulness=0.2, source="ablation")
+
+    c = client.get("/suites/ci/latest-comparison").json()
+    assert c["baseline"]["id"] == old["id"] and c["candidate"]["id"] == new["id"], (
+        "an ablation displaced a real CI run"
+    )
+    assert c["baseline"]["source"] == "ci" and c["candidate"]["source"] == "ci"
+
+
+def test_a_run_says_why_it_exists(client, auth, make_run):
+    assert post(client, auth, make_run)["source"] == "ci", "default must be ci"
+    r = post(client, auth, make_run, name="x", source="ablation")
+    assert r["source"] == "ablation"
+
+
+def test_source_must_be_a_known_kind(client, auth, make_run):
+    """Free-text source would rot into 'CI', 'ci ', 'github-actions'."""
+    r = client.post("/runs", json=make_run(source="whatever"), headers=auth)
+    assert r.status_code == 422
+
+
+def test_ablations_are_only_hidden_from_latest_comparison(client, auth, make_run):
+    """They're real runs — listable, fetchable, comparable when asked directly."""
+    a = post(client, auth, make_run, name="s", label="k=3", source="ablation")
+    b = post(client, auth, make_run, name="s", label="k=2", source="ablation", faithfulness=0.5)
+    assert len(client.get("/runs?name=s").json()) == 2
+    assert client.get(f"/runs/{a['id']}/compare/{b['id']}").status_code == 200
 
 
 def test_latest_comparison_needs_two_runs(client, auth, make_run):

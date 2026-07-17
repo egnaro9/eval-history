@@ -43,6 +43,17 @@ class Run(Base):
     )
     # Optional provenance — what produced this run. Nullable because a run
     # posted from a laptop legitimately has neither.
+    # Why a run exists, not just what it scored.
+    #
+    # "ci"       — produced by a pipeline from a commit. Comparable to another.
+    # "ablation" — a deliberate config sweep (retrieval k=3 vs k=2). Real data,
+    #              but comparing it to a CI run attributes a config change to a
+    #              commit and reports a regression nobody caused.
+    #
+    # latest-comparison filters to 'ci' for exactly that reason: "what did this
+    # push break?" is a question only same-config runs can answer.
+    source: Mapped[str] = mapped_column(String(16), nullable=False, server_default="ci")
+
     git_sha: Mapped[Optional[str]] = mapped_column(String(40))
     label: Mapped[Optional[str]] = mapped_column(String(200))
 
@@ -59,7 +70,12 @@ class Run(Base):
     cases: Mapped[List["Case"]] = relationship(
         back_populates="run",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        # Default lazy loading, not selectin. selectin eagerly fetched every
+        # case for every run in a list query — 20 summaries dragging hundreds of
+        # case rows across the wire to render aggregates that are already
+        # denormalised onto this table precisely so they wouldn't have to.
+        # The detail routes touch .cases and load them on access; the list route
+        # never does. test_list_runs_does_not_load_cases holds this.
         # Without this the database returns cases in whatever order it likes,
         # and a suite read back is not the suite that was stored. Ids are random
         # uuids, so there is nothing else to order by — the position has to be

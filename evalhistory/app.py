@@ -16,8 +16,9 @@ import os
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, List, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -29,12 +30,30 @@ from .schemas import ComparisonOut, RunDetail, RunIn, RunSummary
 
 
 def _write_keys() -> set[str]:
-    return {k.strip() for k in os.environ.get("WRITE_KEYS", "dev-key").split(",") if k.strip()}
+    """Configured write keys. No default, on purpose.
+
+    This used to default to "dev-key". A deploy that forgot to set WRITE_KEYS
+    would then accept a key printed in this repo's README — the whole internet
+    holds the credential. Defaulting to empty fails closed for free: the
+    comprehension drops blanks, the set is empty, and every token mismatches.
+    Unset config should lock the door, not leave a documented key under the mat.
+    """
+    return {k.strip() for k in os.environ.get("WRITE_KEYS", "").split(",") if k.strip()}
 
 
-def require_write_key(authorization: str = Header(default="")) -> str:
-    token = authorization.removeprefix("Bearer ").strip()
-    if token not in _write_keys():
+# auto_error=False so a missing header reaches our own check and returns the
+# same 401 as a wrong key — an anonymous caller learns "you need a key", not
+# "you sent the wrong kind of header". HTTPBearer (rather than a raw Header)
+# also puts padlocks and an Authorize button on /docs, which is public.
+_bearer = HTTPBearer(auto_error=False, description="A write key. Reads need nothing.")
+
+
+def require_write_key(
+    creds: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
+) -> str:
+    token = (creds.credentials if creds else "").strip()
+    keys = _write_keys()
+    if not keys or token not in keys:
         raise HTTPException(status_code=401, detail="a write key is required")
     return token
 
@@ -104,6 +123,13 @@ def create_app() -> FastAPI:
         title="eval-history",
         version=__version__,
         summary="Store eval runs and find out what got worse.",
+        description=(
+            "Writes need a key; reads are open. That asymmetry is deliberate: the point "
+            "of publishing this is that anyone can look, and nobody can scribble on it.\n\n"
+            "Ingests [rag-eval-lab](https://github.com/egnaro9/rag-eval-lab)'s "
+            "`eval_run.json` verbatim, and hands it back in the same shape from "
+            "`/runs/{id}/eval_run` — so anything that already speaks that file needs no adapter."
+        ),
         lifespan=lifespan,
     )
     # The dashboard is a static site on another origin.
@@ -116,9 +142,31 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    @app.get("/health")
+    @app.get("/health", tags=["ops"])
     def health() -> dict:
+        """Liveness: is this process up? Deliberately touches nothing.
+
+        `render.yaml` points healthCheckPath here, and Render restarts the
+        instance when it fails. Checking the database here would turn a Neon
+        blip into a restart, which drops the connections that might have
+        recovered — a crashloop caused by the monitoring. Liveness answers
+        "should I be restarted?", and a database outage is never a yes.
+        Use /readyz to ask whether it can actually serve.
+        """
         return {"status": "ok", "version": __version__}
+
+    @app.get("/readyz", tags=["ops"])
+    def readyz(db: Session = Depends(get_session)) -> dict:
+        """Readiness: can it serve a request end to end, database included?
+
+        Safe to fail — nothing restarts on this. 503 so a load balancer or an
+        uptime check can route away while the process stays alive.
+        """
+        try:
+            db.execute(select(1))
+        except Exception as e:  # noqa: BLE001 - report the class, not a stack trace
+            raise HTTPException(status_code=503, detail=f"database unreachable: {type(e).__name__}")
+        return {"status": "ready", "version": __version__}
 
     @app.post("/runs", response_model=RunSummary, status_code=201)
     def create_run(
@@ -131,6 +179,7 @@ def create_app() -> FastAPI:
             name=payload.run,
             git_sha=payload.git_sha,
             label=payload.label,
+            source=payload.source,
             faithfulness=m.faithfulness,
             precision_at_k=m.precision_at_k,
             recall_at_k=m.recall_at_k,
@@ -200,12 +249,21 @@ def create_app() -> FastAPI:
 
     @app.get("/suites/{name}/latest-comparison", response_model=ComparisonOut)
     def latest_comparison(name: str, db: Session = Depends(get_session)) -> dict:
-        """The two most recent runs of a suite — the CI-friendly shortcut."""
+        """The two most recent CI runs of a suite — the CI-friendly shortcut.
+
+        Ablations are excluded on purpose. This endpoint answers "did the last
+        push break anything", and only same-config runs can answer it: comparing
+        a `k=2` sweep against a commit reports five precision drops and blames
+        them on whoever pushed. Real numbers, wrong question.
+        """
         runs = list(db.scalars(
-            select(Run).where(Run.name == name).order_by(Run.created_at.desc()).limit(2)
+            select(Run)
+            .where(Run.name == name, Run.source == "ci")
+            .order_by(Run.created_at.desc())
+            .limit(2)
         ))
         if len(runs) < 2:
-            raise HTTPException(status_code=404, detail="need at least two runs of this suite")
+            raise HTTPException(status_code=404, detail="need at least two CI runs of this suite")
         newest, previous = runs[0], runs[1]
         return _comparison_out(
             compare_runs(_run_to_dict(previous), _run_to_dict(newest)), previous, newest

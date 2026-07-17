@@ -2,8 +2,8 @@
 
 [![ci](https://github.com/egnaro9/eval-history/actions/workflows/ci.yml/badge.svg)](https://github.com/egnaro9/eval-history/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](https://www.python.org/)
-[![Postgres](https://img.shields.io/badge/Postgres-16-336791)](https://www.postgresql.org/)
-[![tests](https://img.shields.io/badge/tests-33-brightgreen)](tests)
+[![Postgres](https://img.shields.io/badge/Postgres-16%20%7C%2018-336791)](https://www.postgresql.org/)
+[![tests](https://img.shields.io/badge/tests-43-brightgreen)](tests)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 **Store eval runs in Postgres and find out what got worse.**
@@ -28,8 +28,9 @@ rag-eval-lab  ──eval_run.json──►  eval-history  ──compare──►
 | `POST /runs` | Store a run — **accepts `eval_run.json` verbatim**, no translation |
 | `GET /runs` | List, newest first; filter by suite, paginated |
 | `GET /runs/{id}` | One run with every case |
+| `GET /runs/{id}/eval_run` | The same run **in the shape it arrived in** — consumers that speak `eval_run.json` need no adapter |
 | `GET /runs/{a}/compare/{b}` | **What changed** — per-case regressions, improvements, newly-flagged |
-| `GET /suites/{name}/latest-comparison` | The last two runs of a suite — the CI shortcut |
+| `GET /suites/{name}/latest-comparison` | The last two **CI** runs of a suite — the CI shortcut. Ablations excluded: comparing a config sweep to a commit blames a regression on whoever pushed |
 | `DELETE /runs/{id}` | Write key required |
 
 Writes need a `Bearer` key; **reads are open**. That asymmetry is deliberate: anyone can look, nobody can scribble.
@@ -43,6 +44,7 @@ Three decisions in there worth defending:
 - **A tolerance band.** Float scores wobble in the last decimal. Without a band, every run "regresses" and the signal drowns in noise.
 - **Newly-flagged outranks a metric dip.** A case crossing the hallucination threshold is a *behaviour change*, not a rounding error — so it decides the verdict even when the numbers look flat.
 - **Cases match on question text, not position or id.** Ids aren't stable across runs, and a reordered suite isn't a changed one. Questions that appear or vanish are reported **separately** rather than silently scored — a vanished case is a change to the *suite*, not evidence about the system.
+- **A run knows why it exists.** `source` is `ci` or `ablation`. A retrieval sweep is real data and a wrong answer to "what did this push break?" — only same-config runs answer that — so `latest-comparison` filters to `ci`. This wasn't hypothetical: a seeded k=3/k=2 pair sat next to a real CI run and the endpoint reported `regressed` with five precision drops, blaming a config change on a commit. Every number was right; the question was wrong.
 - **A verdict says which two runs produced it.** Both sides of an interesting comparison are usually the *same suite*, so the name can't identify them — `baseline` and `candidate` carry the run id, label and git sha. A verdict you can't trace back to two commits isn't evidence, it's a rumour.
 
 ## Run it
@@ -50,11 +52,16 @@ Three decisions in there worth defending:
 ```bash
 git clone https://github.com/egnaro9/eval-history && cd eval-history
 pip install -e ".[dev]"
-pytest -q                    # 32 tests, no database required
+pytest -q                    # 42 tests, no database required
 uvicorn evalhistory.app:app --reload
 ```
 
 ```bash
+# WRITE_KEYS has no default -- unset means no key is valid, so a deploy that
+# forgets it locks the door instead of accepting one printed in this README.
+export WRITE_KEYS=dev-key
+uvicorn evalhistory.app:app --reload
+
 # store a run straight out of rag-eval-lab
 python -m ragevallab.cli eval --out eval_run.json
 curl -X POST localhost:8000/runs -H "Authorization: Bearer dev-key" \

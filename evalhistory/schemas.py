@@ -7,7 +7,7 @@ than inventing a wire format and making callers translate.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -50,6 +50,15 @@ class RunIn(BaseModel):
     cases: List[CaseIn] = Field(..., min_length=1)
     git_sha: Optional[str] = Field(None, max_length=40)
     label: Optional[str] = Field(None, max_length=200)
+    source: Literal["ci", "ablation"] = Field(
+        "ci",
+        description=(
+            "Why this run exists. 'ci' = produced by a pipeline from a commit. "
+            "'ablation' = a deliberate config sweep, real but not comparable to a "
+            "commit — latest-comparison ignores these so a config change is never "
+            "reported as a regression someone caused."
+        ),
+    )
 
 
 class RunSummary(BaseModel):
@@ -64,6 +73,7 @@ class RunSummary(BaseModel):
     n_cases: int
     git_sha: Optional[str] = None
     label: Optional[str] = None
+    source: str = "ci"
 
     model_config = {"from_attributes": True}
 
@@ -107,6 +117,7 @@ class RunRef(BaseModel):
     name: str
     label: Optional[str] = None
     git_sha: Optional[str] = None
+    source: str = "ci"
     created_at: datetime
 
     model_config = {"from_attributes": True}
