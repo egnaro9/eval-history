@@ -122,7 +122,7 @@ evalhistory/
   schemas.py   Pydantic contract — accepts eval_run.json verbatim
   app.py       FastAPI: routes, auth, CORS, lifespan
   migrate.py   schema at startup: Alembic on Postgres, create_all on SQLite
-tests/         33 tests — comparison logic, API, auth, validation, cascade,
+tests/         43 tests — comparison logic, API, auth, validation, cascade,
                migration/model drift (the drift test needs Postgres; it skips
                on SQLite rather than pretending to check)
 ```
