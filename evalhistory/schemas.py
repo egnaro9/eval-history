@@ -50,13 +50,15 @@ class RunIn(BaseModel):
     cases: List[CaseIn] = Field(..., min_length=1)
     git_sha: Optional[str] = Field(None, max_length=40)
     label: Optional[str] = Field(None, max_length=200)
-    source: Literal["ci", "ablation"] = Field(
+    source: Literal["ci", "ablation", "pr"] = Field(
         "ci",
         description=(
-            "Why this run exists. 'ci' = produced by a pipeline from a commit. "
-            "'ablation' = a deliberate config sweep, real but not comparable to a "
-            "commit — latest-comparison ignores these so a config change is never "
-            "reported as a regression someone caused."
+            "Why this run exists. 'ci' = produced by a pipeline from a commit on the "
+            "main branch — these are the baseline history. 'pr' = produced on a pull "
+            "request, compared against the ci baseline by a merge gate but kept out of "
+            "the baseline itself. 'ablation' = a deliberate config sweep. "
+            "latest-comparison only looks at 'ci' runs, so neither a PR run nor a "
+            "config sweep is ever mistaken for a regression someone shipped."
         ),
     )
 
