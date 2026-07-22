@@ -66,10 +66,30 @@ def test_metrics_scrape_is_not_self_instrumented(client):
     assert 'route="/metrics"' not in body
 
 
-def test_middleware_logs_a_structured_request_line(client, caplog):
-    with caplog.at_level(logging.INFO, logger="evalhistory"):
+class _Capture(logging.Handler):
+    """Collects LogRecords straight off the 'evalhistory' logger — independent of
+    root handlers and pytest's caplog, both of which other tests reconfigure."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+def test_middleware_logs_a_structured_request_line(client):
+    cap = _Capture()
+    logger = logging.getLogger("evalhistory")
+    old_level = logger.level
+    logger.setLevel(logging.INFO)
+    logger.addHandler(cap)
+    try:
         client.get("/health")
-    line = next(r for r in caplog.records if r.getMessage() == "request")
+    finally:
+        logger.removeHandler(cap)
+        logger.setLevel(old_level)
+    line = next(r for r in cap.records if r.getMessage() == "request")
     assert line.method == "GET"
     assert line.path == "/health"
     assert line.route == "/health"
