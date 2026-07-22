@@ -23,10 +23,11 @@ dependencies = [
   "psycopg[binary]>=3.1",
   "uvicorn[standard]>=0.27",
   "alembic>=1.13",
+  "prometheus-client>=0.20",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "httpx>=0.27"]
+dev = ["pytest>=7", "httpx>=0.27", "pytest-cov>=4"]
 
 [project.urls]
 Homepage = "https://github.com/egnaro9/eval-history"

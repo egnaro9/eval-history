@@ -22,8 +22,11 @@ jobs:
       - run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-      - name: Test (SQLite)
-        run: pytest -q
+      - name: Test (SQLite) + coverage gate
+        # The badge promises "coverage 88%+"; this is what keeps that promise
+        # honest — a drop below the floor fails the build rather than the README
+        # quietly going stale. (Postgres-only lines are covered in that job.)
+        run: pytest -q --cov=evalhistory --cov-report=term-missing --cov-fail-under=88
 
   # The one that matters: the same suite against the database production uses.
   # SQLite parity is an assumption; this is the check. Postgres enforces
@@ -95,3 +98,25 @@ jobs:
               c.execute(text("select 1"))
           print(f"Postgres OK — tables={sorted(tables)} fks={len(fks)} indexes={len(idx)}")
           PY
+
+  # Post-deploy smoke test. Render auto-deploys this repo on a push to main; this
+  # job doesn't deploy — it proves the deploy that just happened actually serves.
+  # /readyz touches the database, so a 200 here means the live app AND its Neon
+  # Postgres are both up, end to end, after the merge.
+  smoke:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [sqlite, postgres]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for the Render redeploy, then require /readyz to be ready
+        run: |
+          url="https://eval-history.onrender.com/readyz"
+          echo "Polling $url — free tier cold-starts and redeploys take a few minutes."
+          for i in $(seq 1 40); do
+            code=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 60 "$url" || echo 000)
+            if [ "$code" = "200" ] && grep -q '"status":"ready"' /tmp/body; then
+              echo "ready after $i attempt(s): $(cat /tmp/body)"; exit 0
+            fi
+            echo "attempt $i: HTTP $code — retry in 15s"; sleep 15
+          done
+          echo "::error::deployed /readyz never returned ready"; cat /tmp/body 2>/dev/null || true; exit 1

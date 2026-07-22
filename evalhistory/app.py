@@ -16,7 +16,7 @@ import os
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
@@ -26,6 +26,7 @@ from . import __version__
 from .compare import CaseDelta, Comparison, compare_runs
 from .db import get_session
 from .models import Case, Run
+from .obs import RequestObservability, configure_logging, logger, metrics_response
 from .schemas import ComparisonOut, RunDetail, RunIn, RunSummary
 
 
@@ -114,11 +115,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from .db import ENGINE
     from .migrate import ensure_schema
 
-    print(f"schema: {ensure_schema(ENGINE)}", flush=True)
+    logger.info("schema ensured", extra={"schema": ensure_schema(ENGINE)})
     yield
 
 
 def create_app() -> FastAPI:
+    configure_logging()
     app = FastAPI(
         title="eval-history",
         version=__version__,
@@ -141,6 +143,16 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["*"],
     )
+    # Added last so it wraps CORS and everything else — it therefore times the
+    # whole request and sees the final status, request id, and route template.
+    app.add_middleware(RequestObservability)
+
+    @app.get("/metrics", tags=["ops"], summary="Prometheus metrics")
+    def metrics() -> Response:
+        """Request counts and latency, labeled by method, route template, and
+        status. Scraped by Prometheus; excluded from its own instrumentation so
+        the scrape loop doesn't dominate the numbers it reports."""
+        return metrics_response()
 
     @app.get("/health", tags=["ops"])
     def health() -> dict:

@@ -1,0 +1,45 @@
+# One command to run the whole thing the way production does: the FastAPI app
+# against a real Postgres, not SQLite.
+#
+#   docker compose up --build      # API on :8000, Postgres 18 alongside
+#
+# The app migrates its own schema on startup and waits for the database to be
+# healthy first, so a fresh `up` comes up ready.
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: eval
+      POSTGRES_PASSWORD: eval
+      POSTGRES_DB: evalhistory
+    volumes:
+      - eval-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eval -d evalhistory"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # Same postgresql:// shape the CI matrix and render.yaml use; the app
+      # normalizes the driver. `db` is this compose network's hostname.
+      DATABASE_URL: "postgresql://eval:eval@db:5432/evalhistory"
+      # A throwaway write key for local runs; a real deploy generates one.
+      WRITE_KEYS: "${WRITE_KEYS:-dev-write-key}"
+      CORS_ORIGINS: "http://localhost:3000,https://egnaro9.github.io"
+      PORT: "8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  eval-pgdata:
