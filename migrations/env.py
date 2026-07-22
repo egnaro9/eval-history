@@ -17,7 +17,11 @@ from evalhistory.models import Base
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers defaults to True, which would switch off the
+    # app's own "evalhistory" logger the moment migrations run — and migrations
+    # run at startup on Postgres, so the structured request log would go silent
+    # in production. Keep the existing loggers alive.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # The same normalisation the app applies: postgres:// -> postgresql+psycopg://.
 # The % escaping is for configparser, which reads a bare % as interpolation and
