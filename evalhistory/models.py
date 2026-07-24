@@ -67,6 +67,12 @@ class Run(Base):
     flagged_cases: Mapped[int] = mapped_column(Integer, nullable=False)
     n_cases: Mapped[int] = mapped_column(Integer, nullable=False)
 
+    # A severity-weighted vulnerability score, present only on crash-test runs
+    # (source="crash_test"). Nullable because rag-eval-lab and model-drift runs
+    # don't have one — this is the crash test tracking its own posture over time,
+    # off the correctness board.
+    vulnerability_score: Mapped[Optional[float]] = mapped_column(Float)
+
     cases: Mapped[List["Case"]] = relationship(
         back_populates="run",
         cascade="all, delete-orphan",

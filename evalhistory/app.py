@@ -61,16 +61,21 @@ def require_write_key(
 
 def _run_to_dict(run: Run) -> dict:
     """Back to the eval_run shape the comparer speaks."""
+    metrics = {
+        "faithfulness": run.faithfulness,
+        "precision@k": run.precision_at_k,
+        "recall@k": run.recall_at_k,
+        "citation_rate": run.citation_rate,
+        "flagged_cases": float(run.flagged_cases),
+        "n_cases": float(run.n_cases),
+    }
+    # Only crash-test runs carry it; adding it unconditionally would insert a
+    # None into the comparer's metric math for every rag / model-drift run.
+    if run.vulnerability_score is not None:
+        metrics["vulnerability_score"] = run.vulnerability_score
     return {
         "run": run.name,
-        "metrics": {
-            "faithfulness": run.faithfulness,
-            "precision@k": run.precision_at_k,
-            "recall@k": run.recall_at_k,
-            "citation_rate": run.citation_rate,
-            "flagged_cases": float(run.flagged_cases),
-            "n_cases": float(run.n_cases),
-        },
+        "metrics": metrics,
         "cases": [
             {
                 "q": c.q,
@@ -198,6 +203,7 @@ def create_app() -> FastAPI:
             citation_rate=m.citation_rate,
             flagged_cases=int(m.flagged_cases),
             n_cases=int(m.n_cases),
+            vulnerability_score=m.vulnerability_score,
         )
         for i, c in enumerate(payload.cases):
             run.cases.append(

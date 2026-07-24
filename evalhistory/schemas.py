@@ -38,6 +38,9 @@ class Metrics(BaseModel):
     citation_rate: float
     flagged_cases: float
     n_cases: float
+    # Present only on crash-test runs — the severity-weighted vulnerability score.
+    # Optional so rag-eval-lab / model-drift runs ingest unchanged.
+    vulnerability_score: Optional[float] = Field(None, ge=0, le=1)
 
     model_config = {"populate_by_name": True}
 
@@ -50,15 +53,17 @@ class RunIn(BaseModel):
     cases: List[CaseIn] = Field(..., min_length=1)
     git_sha: Optional[str] = Field(None, max_length=40)
     label: Optional[str] = Field(None, max_length=200)
-    source: Literal["ci", "ablation", "pr"] = Field(
+    source: Literal["ci", "ablation", "pr", "crash_test"] = Field(
         "ci",
         description=(
             "Why this run exists. 'ci' = produced by a pipeline from a commit on the "
             "main branch — these are the baseline history. 'pr' = produced on a pull "
             "request, compared against the ci baseline by a merge gate but kept out of "
-            "the baseline itself. 'ablation' = a deliberate config sweep. "
-            "latest-comparison only looks at 'ci' runs, so neither a PR run nor a "
-            "config sweep is ever mistaken for a regression someone shipped."
+            "the baseline itself. 'ablation' = a deliberate config sweep. 'crash_test' "
+            "= an adversarial/agentic crash-test run — real history for its own suite, "
+            "but a different question than correctness, so it stays off the CI board. "
+            "latest-comparison only looks at 'ci' runs, so none of the others is ever "
+            "mistaken for a regression someone shipped."
         ),
     )
 
@@ -73,6 +78,7 @@ class RunSummary(BaseModel):
     citation_rate: float
     flagged_cases: int
     n_cases: int
+    vulnerability_score: Optional[float] = None
     git_sha: Optional[str] = None
     label: Optional[str] = None
     source: str = "ci"
