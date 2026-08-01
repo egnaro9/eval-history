@@ -1,13 +1,13 @@
 # eval-history
 
+**Store eval runs in Postgres and find out what got worse.**
+
 [![ci](https://github.com/egnaro9/eval-history/actions/workflows/ci.yml/badge.svg)](https://github.com/egnaro9/eval-history/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](https://www.python.org/)
 [![Postgres](https://img.shields.io/badge/Postgres-16%20%7C%2018-336791)](https://www.postgresql.org/)
-[![tests](https://img.shields.io/badge/tests-51-brightgreen)](tests)
+[![tests](https://img.shields.io/badge/tests-57-brightgreen)](tests)
 [![coverage](https://img.shields.io/badge/coverage-88%25%2B-brightgreen)](.github/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-
-**Store eval runs in Postgres and find out what got worse.**
 
 An eval score tells you how the system did *today*. It can't tell you that yesterday's change made things worse — and "worse" is the only thing you actually need to be told. This is the missing half: a REST API that ingests [rag-eval-lab](https://github.com/egnaro9/rag-eval-lab)'s `eval_run.json`, keeps every run, and answers one question well:
 
@@ -29,7 +29,6 @@ the one answer its sources do not support; the `eval_run.json` it emits is exact
 service stores and what a later run gets compared against. The faithfulness number moving is the
 kind of change the comparison is here to notice.
 [Play it as a terminal session](https://asciinema.org/a/k0m7dOqwWt1kdSlx).*
-
 
 ## What it does
 
