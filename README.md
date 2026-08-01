@@ -61,7 +61,7 @@ Three decisions in there worth defending:
 ```bash
 git clone https://github.com/egnaro9/eval-history && cd eval-history
 pip install -e ".[dev]"
-pytest -q                    # 50 tests, no database required
+pytest -q                    # 56 pass with no database; 1 skips, it needs Postgres
 uvicorn evalhistory.app:app --reload
 ```
 
@@ -131,7 +131,7 @@ evalhistory/
   schemas.py   Pydantic contract — accepts eval_run.json verbatim
   app.py       FastAPI: routes, auth, CORS, lifespan
   migrate.py   schema at startup: Alembic on Postgres, create_all on SQLite
-tests/         51 tests — comparison logic, API, auth, validation, cascade,
+tests/         57 tests — comparison logic, API, auth, validation, cascade,
                observability (logs/metrics/request-id), migration/model drift
                (the drift test needs Postgres; it skips on SQLite rather than
                pretending to check)
