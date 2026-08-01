@@ -22,6 +22,15 @@ rag-eval-lab  ──eval_run.json──►  eval-history  ──compare──►
 
 ---
 
+<img src="https://raw.githubusercontent.com/egnaro9/rag-eval-lab/main/docs/demo.gif" alt="rag-eval-lab's harness catching a planted hallucination at faithfulness 0.5 — the kind of run this service stores" width="100%">
+
+*The input side. [rag-eval-lab](https://github.com/egnaro9/rag-eval-lab) grades a suite and flags
+the one answer its sources do not support; the `eval_run.json` it emits is exactly what this
+service stores and what a later run gets compared against. The faithfulness number moving is the
+kind of change the comparison is here to notice.
+[Play it as a terminal session](https://asciinema.org/a/k0m7dOqwWt1kdSlx).*
+
+
 ## What it does
 
 | | |
