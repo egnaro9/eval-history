@@ -143,7 +143,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[o.strip() for o in os.environ.get(
-            "CORS_ORIGINS", "https://egnaro9.github.io,http://localhost:3000"
+            "CORS_ORIGINS", "https://erikhill.dev,https://egnaro9.github.io,http://localhost:3000"
         ).split(",")],
         allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["*"],

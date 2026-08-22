@@ -30,7 +30,7 @@ services:
       DATABASE_URL: "postgresql://eval:eval@db:5432/evalhistory"
       # A throwaway write key for local runs; a real deploy generates one.
       WRITE_KEYS: "${WRITE_KEYS:-dev-write-key}"
-      CORS_ORIGINS: "http://localhost:3000,https://egnaro9.github.io"
+      CORS_ORIGINS: "https://erikhill.dev,https://egnaro9.github.io,http://localhost:3000"
       PORT: "8000"
     depends_on:
       db:

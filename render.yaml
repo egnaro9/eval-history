@@ -21,4 +21,4 @@ services:
       - key: WRITE_KEYS
         generateValue: true    # a random write key; reads stay open
       - key: CORS_ORIGINS
-        value: https://egnaro9.github.io,http://localhost:3000
+        value: https://erikhill.dev,https://egnaro9.github.io,http://localhost:3000
