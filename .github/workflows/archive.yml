@@ -49,7 +49,12 @@ jobs:
             echo "::error::under Settings > Secrets and variables > Actions."
             exit 1
           fi
-          python tools/export_static.py --out site
+          # Adjacent-within-suite pairs are emitted automatically. This one is
+          # named explicitly because erikhill.dev links it directly and the two
+          # runs are not necessarily adjacent; without it that published URL
+          # would 404 in the archive.
+          python tools/export_static.py --out site \
+            --pair d800b9a8d3284240bd536bb63fa5f2da:2a95eaada39c453d9920f2ab4fd50391
           test -s site/manifest.json
 
       # The guard that matters. A transient database fault, a wrong branch, or a

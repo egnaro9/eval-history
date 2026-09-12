@@ -90,11 +90,48 @@ def test_export_matches_every_live_read_route(seeded, tmp_path, monkeypatch):
     for i in ids:
         same(f"/runs/{i}", f"runs/{i}.json")
         same(f"/runs/{i}/eval_run", f"runs/{i}/eval_run.json")
-    for a in ids:
-        for b in ids:
-            if a != b:
-                same(f"/runs/{a}/compare/{b}", f"runs/{a}/compare/{b}.json")
+    # Adjacent within a suite, both directions. suite-a has three runs in time
+    # order aaaa1111, bbbb2222, cccc3333, so two adjacencies and four files.
+    for a, b in [("aaaa1111", "bbbb2222"), ("bbbb2222", "aaaa1111"),
+                 ("bbbb2222", "cccc3333"), ("cccc3333", "bbbb2222")]:
+        same(f"/runs/{a}/compare/{b}", f"runs/{a}/compare/{b}.json")
     same("/suites/suite-a/latest-comparison", "suites/suite-a/latest-comparison.json")
+
+
+def test_cross_suite_and_distant_pairs_are_not_emitted(seeded, tmp_path, monkeypatch):
+    """The cross product is N*(N-1): at 946 runs that is 893,970 files nobody can
+    reach. Only adjacent-within-suite pairs are emitted, so a cross-suite pair and
+    a non-adjacent pair must be absent even though both runs exist."""
+    out = tmp_path / "export"
+    assert _run_export(out, monkeypatch) == 0
+    # dddd4444 is suite-b; aaaa1111 is suite-a. Different suites, never adjacent.
+    assert not (out / "runs" / "aaaa1111" / "compare" / "dddd4444.json").exists()
+    # aaaa1111 and cccc3333 are both suite-a but two apart, not adjacent.
+    assert not (out / "runs" / "aaaa1111" / "compare" / "cccc3333.json").exists()
+    # and the adjacent one it sits between IS present
+    assert (out / "runs" / "aaaa1111" / "compare" / "bbbb2222.json").exists()
+
+
+def test_explicit_pair_is_emitted_even_when_not_adjacent(seeded, tmp_path, monkeypatch):
+    """Links that already exist elsewhere are not always adjacent. --pair names
+    them so a published URL keeps resolving."""
+    out = tmp_path / "export"
+    import importlib.util, sys as _sys
+    spec = importlib.util.spec_from_file_location(
+        "export_static2", REPO / "tools" / "export_static.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    monkeypatch.setenv("DATABASE_URL", "sqlite+pysqlite:///:memory:")
+    monkeypatch.setattr("sys.argv", ["export_static.py", "--out", str(out),
+                                     "--pair", "aaaa1111:dddd4444"])
+    assert mod.main() == 0
+
+    client = TestClient(create_app())
+    live = client.get("/runs/aaaa1111/compare/dddd4444")
+    assert live.status_code == 200
+    f = out / "runs" / "aaaa1111" / "compare" / "dddd4444.json"
+    assert f.exists(), "explicitly requested pair was not emitted"
+    assert json.loads(f.read_text()) == live.json()
 
 
 def test_suite_without_two_ci_runs_gets_no_file(seeded, tmp_path, monkeypatch):

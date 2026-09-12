@@ -63,7 +63,10 @@ def _write(root: pathlib.Path, rel: str, payload) -> tuple[str, str]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="export", help="output directory")
-    ap.add_argument("--max-pairs", type=int, default=2000,
+    ap.add_argument("--pair", action="append", default=[], metavar="A:B",
+                    help="also emit this exact comparison, repeatable. Use it for "
+                         "pairs linked from elsewhere that are not adjacent.")
+    ap.add_argument("--max-pairs", type=int, default=20000,
                     help="refuse to emit more comparison files than this")
     args = ap.parse_args()
 
@@ -107,26 +110,51 @@ def main() -> int:
             rel, sha = _write(root, f"runs/{r.id}/eval_run.json", _run_to_dict(r))
             files[rel] = sha
 
-        # Every ordered pair, because "a" is the baseline and the comparison is
-        # not symmetric. Guarded: N runs give N*(N-1) files.
-        n_pairs = len(runs) * (len(runs) - 1)
-        if n_pairs > args.max_pairs:
-            print(f"{n_pairs} ordered pairs exceeds --max-pairs {args.max_pairs}; "
-                  f"emitting none. Raise the limit deliberately if you want them.",
-                  file=sys.stderr)
+        # NOT every ordered pair. The cross product is N*(N-1), which at 946 runs
+        # is 893,970 files that nobody can navigate to. Emit the comparisons that
+        # are actually reachable:
+        #
+        #   - adjacent runs WITHIN a suite, both directions, because "did the last
+        #     push break anything" only makes sense against the run before it, and
+        #     comparing across suites reports real numbers for the wrong question
+        #   - any pair named with --pair, for links that already exist elsewhere
+        #
+        # Comparison is not symmetric (a is the baseline), so both directions are
+        # emitted for each adjacency rather than guessing which way a link points.
+        by_id = {r.id: r for r in runs}
+        dicts = {r.id: _run_to_dict(r) for r in runs}
+
+        wanted: set[tuple[str, str]] = set()
+        by_suite: dict[str, list] = {}
+        for r in runs:                      # runs is newest-first
+            by_suite.setdefault(r.name, []).append(r)
+        for name, group in by_suite.items():
+            for newer, older in zip(group, group[1:]):
+                wanted.add((older.id, newer.id))
+                wanted.add((newer.id, older.id))
+
+        for spec in args.pair:
+            if ":" not in spec:
+                print(f"--pair {spec!r} is not A:B, skipping", file=sys.stderr)
+                continue
+            a, b = spec.split(":", 1)
+            if a not in by_id or b not in by_id:
+                print(f"--pair {spec}: unknown run id, skipping", file=sys.stderr)
+                continue
+            wanted.add((a, b))
+
+        if len(wanted) > args.max_pairs:
+            print(f"{len(wanted)} comparisons exceeds --max-pairs {args.max_pairs}; "
+                  f"emitting none.", file=sys.stderr)
         else:
-            dicts = {r.id: _run_to_dict(r) for r in runs}
-            by_id = {r.id: r for r in runs}
-            for a in runs:
-                for b in runs:
-                    if a.id == b.id:
-                        continue
-                    out = _dump(ComparisonOut,
-                                _comparison_out(compare_runs(dicts[a.id], dicts[b.id]),
-                                                by_id[a.id], by_id[b.id]))
-                    rel, sha = _write(root, f"runs/{a.id}/compare/{b.id}.json", out)
-                    files[rel] = sha
-            print(f"comparisons: {n_pairs}")
+            for a, b in sorted(wanted):
+                out = _dump(ComparisonOut,
+                            _comparison_out(compare_runs(dicts[a], dicts[b]),
+                                            by_id[a], by_id[b]))
+                rel, sha = _write(root, f"runs/{a}/compare/{b}.json", out)
+                files[rel] = sha
+            print(f"comparisons: {len(wanted)} "
+                  f"(adjacent within {len(by_suite)} suite(s), plus {len(args.pair)} explicit)")
 
         # Same filter the live route used: CI runs only, ablations excluded on
         # purpose, newest two. A suite with fewer than two CI runs 404'd live and
