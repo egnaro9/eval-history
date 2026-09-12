@@ -1,0 +1,115 @@
+# Publish the history as static files, so it outlives the host.
+#
+# Render suspended this service over an unpaid invoice and every /runs link on
+# erikhill.dev went 503. The runs are recorded evidence, not live computation,
+# so nothing here needs a server: Actions is free and unlimited on public repos,
+# Neon's free plan is permanent, and Pages has no billing to lapse. The export
+# is byte-identical to what the API returned, proven by tests/test_export_static.py.
+#
+# Set the repo secret DATABASE_URL to the Neon connection string. It is passed to
+# the exporter through the environment, never echoed, and the manifest records
+# the database host only.
+name: archive
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      allow_shrink:
+        description: "Publish even if the run count DROPPED (say why in the run notes)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: archive
+  cancel-in-progress: false
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+
+      - name: Export every read route to static JSON
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::DATABASE_URL secret is not set. Add the Neon connection string"
+            echo "::error::under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          python tools/export_static.py --out site
+          test -s site/manifest.json
+
+      # The guard that matters. A transient database fault, a wrong branch, or a
+      # half-migrated schema can all produce a SMALLER archive that exports
+      # cleanly and hashes fine. Publishing it would overwrite good evidence with
+      # less evidence, silently, and the manifest would look healthy either way.
+      # So compare against what is already published and refuse to shrink.
+      - name: Refuse to publish fewer runs than are already live
+        env:
+          ALLOW_SHRINK: ${{ inputs.allow_shrink }}
+        run: |
+          new=$(python -c "import json;print(json.load(open('site/manifest.json'))['run_count'])")
+          old=$(curl -fsS --max-time 20 https://erikhill.dev/eval-history/manifest.json 2>/dev/null \
+                | python -c "import json,sys;print(json.load(sys.stdin)['run_count'])" 2>/dev/null || echo "none")
+          echo "published run_count: $old"
+          echo "new run_count:       $new"
+          if [ "$old" = "none" ]; then
+            echo "Nothing published yet; this is the first archive."
+          elif [ "$new" -lt "$old" ]; then
+            if [ "$ALLOW_SHRINK" = "true" ]; then
+              echo "::warning::Run count dropped $old -> $new, publishing anyway by explicit request."
+            else
+              echo "::error::Run count DROPPED $old -> $new. Refusing to publish a smaller archive."
+              echo "::error::Re-run with allow_shrink if runs were deleted on purpose."
+              exit 1
+            fi
+          fi
+
+      - name: A browsable index, so the directory is not a 404
+        run: |
+          runs=$(python -c "import json;print(json.load(open('site/manifest.json'))['run_count'])")
+          when=$(python -c "import json;print(json.load(open('site/manifest.json'))['exported_at'])")
+          cat > site/index.html <<HTML
+          <!doctype html><meta charset="utf-8"><title>eval-history archive</title>
+          <style>body{font:16px/1.6 ui-monospace,Menlo,monospace;max-width:46rem;margin:4rem auto;padding:0 1rem;background:#0e1316;color:#dae2e4}
+          a{color:#f2a53c}code{color:#9aa7ad}</style>
+          <h1>eval-history, archived</h1>
+          <p>$runs runs, exported $when. Static copies of the read routes the API served,
+          byte-identical to its responses.</p>
+          <ul>
+            <li><a href="runs.json"><code>runs.json</code></a> every run, newest first</li>
+            <li><code>runs/&lt;id&gt;.json</code> one run</li>
+            <li><code>runs/&lt;id&gt;/eval_run.json</code> the shape it arrived in</li>
+            <li><code>runs/&lt;a&gt;/compare/&lt;b&gt;.json</code> what changed, a is the baseline</li>
+            <li><code>suites/&lt;name&gt;/latest-comparison.json</code> newest two CI runs</li>
+            <li><a href="manifest.json"><code>manifest.json</code></a> sha256 of every file above</li>
+          </ul>
+          HTML
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: export
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
