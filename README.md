@@ -108,12 +108,15 @@ It also earns something subtler. The deployed database predates Alembic — it w
 
 ## Deploy
 
-`render.yaml` is a Render blueprint — web service, health check, generated write key. Point `DATABASE_URL` at any Postgres.
+There is no hosted API any more, and that is deliberate rather than a fault.
+Render dropped its free tier; the read routes are now a **static archive**
+published to [erikhill.dev/eval-history](https://erikhill.dev/eval-history/) by
+a scheduled job that exports every read route to JSON straight from Neon,
+byte-identical to what the API returned and hashed in a manifest. Read-only
+history is better served by files than by a process, so it stays that way.
 
-**Two honest notes about free hosting**, because anyone clicking a live link deserves them:
-
-- The **database is deliberately not declared in the blueprint.** Render's free Postgres is *deleted after 30 days* — a portfolio link that dies in a month is worse than no link. So the database lives on [Neon](https://neon.tech)'s free tier (permanent) and Render just holds the connection string.
-- The **web service sleeps** after ~15 minutes idle and takes **~30s to wake**. That's the cost of free, and it's better said out loud than hidden behind a mystery spinner.
+The app still runs anywhere that speaks Postgres. Point `DATABASE_URL` at any
+instance and serve it with uvicorn:
 
 ```bash
 # any Postgres works — Neon, Supabase, RDS, or local

@@ -124,6 +124,49 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
+def ingest(db: Session, payload: "RunIn") -> Run:
+    """Store one eval_run payload and return the persisted Run.
+
+    Lifted out of the POST /runs route so a writer that cannot reach the HTTP
+    API can still record a run without restating this mapping. Render dropped
+    its free tier and took the hosted API with it, and rag-eval-lab's CI had
+    been posting into the void for 13 days before anyone noticed; it now calls
+    this directly against Neon. One mapping, one place: a second copy of these
+    field names in another repo is a schema drift waiting to happen.
+    """
+    m = payload.metrics
+    run = Run(
+        name=payload.run,
+        git_sha=payload.git_sha,
+        label=payload.label,
+        source=payload.source,
+        faithfulness=m.faithfulness,
+        precision_at_k=m.precision_at_k,
+        recall_at_k=m.recall_at_k,
+        citation_rate=m.citation_rate,
+        flagged_cases=int(m.flagged_cases),
+        n_cases=int(m.n_cases),
+        vulnerability_score=m.vulnerability_score,
+    )
+    for i, c in enumerate(payload.cases):
+        run.cases.append(
+            Case(
+                ordinal=i,
+                q=c.q, answer=c.answer, note=c.note,
+                retrieved=c.retrieved, citations=c.citations,
+                faithfulness=c.scores.faithfulness,
+                precision_at_k=c.scores.precision_at_k,
+                recall_at_k=c.scores.recall_at_k,
+                citation=c.scores.citation,
+                flagged=c.flagged,
+            )
+        )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    return run
+
+
 def create_app() -> FastAPI:
     configure_logging()
     app = FastAPI(
@@ -191,37 +234,7 @@ def create_app() -> FastAPI:
         db: Session = Depends(get_session),
         _key: str = Depends(require_write_key),
     ) -> Run:
-        m = payload.metrics
-        run = Run(
-            name=payload.run,
-            git_sha=payload.git_sha,
-            label=payload.label,
-            source=payload.source,
-            faithfulness=m.faithfulness,
-            precision_at_k=m.precision_at_k,
-            recall_at_k=m.recall_at_k,
-            citation_rate=m.citation_rate,
-            flagged_cases=int(m.flagged_cases),
-            n_cases=int(m.n_cases),
-            vulnerability_score=m.vulnerability_score,
-        )
-        for i, c in enumerate(payload.cases):
-            run.cases.append(
-                Case(
-                    ordinal=i,
-                    q=c.q, answer=c.answer, note=c.note,
-                    retrieved=c.retrieved, citations=c.citations,
-                    faithfulness=c.scores.faithfulness,
-                    precision_at_k=c.scores.precision_at_k,
-                    recall_at_k=c.scores.recall_at_k,
-                    citation=c.scores.citation,
-                    flagged=c.flagged,
-                )
-            )
-        db.add(run)
-        db.commit()
-        db.refresh(run)
-        return run
+        return ingest(db, payload)
 
     @app.get("/runs", response_model=List[RunSummary])
     def list_runs(
