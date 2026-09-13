@@ -33,6 +33,9 @@ concurrency:
 jobs:
   export:
     runs-on: ubuntu-latest
+    outputs:
+      exported_at: ${{ steps.stamp.outputs.exported_at }}
+      runs_sha256: ${{ steps.stamp.outputs.runs_sha256 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -56,6 +59,18 @@ jobs:
           python tools/export_static.py --out site \
             --pair d800b9a8d3284240bd536bb63fa5f2da:2a95eaada39c453d9920f2ab4fd50391
           test -s site/manifest.json
+
+      # Hand the verify job the identity of THIS export, so it can tell the
+      # archive it just published apart from whatever Pages served before.
+      - name: Stamp this export
+        id: stamp
+        run: |
+          python - >> "$GITHUB_OUTPUT" <<'EOF'
+          import json
+          m = json.load(open("site/manifest.json"))
+          print(f"exported_at={m['exported_at']}")
+          print(f"runs_sha256={m['files']['runs.json']}")
+          EOF
 
       # The guard that matters. A transient database fault, a wrong branch, or a
       # half-migrated schema can all produce a SMALLER archive that exports
@@ -118,3 +133,42 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # The post-deploy smoke test. It used to live in ci.yml and poll the Render
+  # service's /readyz on every push to main, because Render redeployed on push.
+  # Render is gone and nothing deploys on push any more, so that job spent ten
+  # minutes per push polling a deleted host before failing, and proved nothing.
+  #
+  # The deploy that matters now is THIS workflow publishing to Pages, so the
+  # check belongs here. It asserts two things, and both can go red:
+  #   - the manifest being served carries THIS run's exported_at, so a stale
+  #     Pages cache or a deploy that silently did not land cannot pass;
+  #   - the served runs.json hashes to what the manifest records, so a truncated
+  #     or corrupted publish is caught rather than trusted.
+  verify:
+    needs: [export, deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: The published archive is the one this run exported
+        env:
+          WANT_AT: ${{ needs.export.outputs.exported_at }}
+          WANT_SHA: ${{ needs.export.outputs.runs_sha256 }}
+        run: |
+          base="https://erikhill.dev/eval-history"
+          for i in $(seq 1 20); do
+            got=$(curl -s --max-time 20 "$base/manifest.json?nocache=$(date +%s)" \
+                  | python -c "import json,sys; print(json.load(sys.stdin)['exported_at'])" 2>/dev/null || true)
+            if [ "$got" = "$WANT_AT" ]; then
+              echo "manifest is live after $i attempt(s): exported_at $got"
+              break
+            fi
+            echo "attempt $i: serving exported_at '${got:-unreadable}', want '$WANT_AT'"
+            [ "$i" = 20 ] && { echo "::error::Pages never served this run's manifest"; exit 1; }
+            sleep 15
+          done
+          have=$(curl -s --max-time 30 "$base/runs.json?nocache=$(date +%s)" | sha256sum | cut -d' ' -f1)
+          if [ "$have" != "$WANT_SHA" ]; then
+            echo "::error::served runs.json hashes to $have, the manifest records $WANT_SHA"
+            exit 1
+          fi
+          echo "runs.json served intact: sha256 $have"
