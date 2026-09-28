@@ -16,6 +16,8 @@ from __future__ import annotations
 import datetime as dt
 import importlib.util
 import json
+import os
+from urllib.parse import urlsplit
 from pathlib import Path
 
 import pytest
@@ -152,3 +154,30 @@ def test_manifest_records_no_credentials(seeded, tmp_path, monkeypatch):
     assert set(manifest) == {"exported_at", "source_host", "run_count", "file_count", "files"}
     for secret in ("password", "@", "://"):
         assert secret not in manifest["source_host"]
+
+
+REAL_HOST = "ep-rapid-resonance-aujnp17j-pooler.c-10.us-east-1.aws.neon.tech"
+
+
+def test_provider_label_does_not_publish_the_endpoint():
+    """The exporter must not put a live database endpoint on a public page.
+
+    This is a UNIT test on the labeller, not an assertion inside the manifest test. The
+    manifest fixture uses sqlite+pysqlite:///:memory:, whose hostname is empty, so any
+    endpoint assertion written there is skipped and passes vacuously.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "export_static_label", REPO / "tools" / "export_static.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    label = mod._provider_label(REAL_HOST)
+    assert REAL_HOST not in label, "the full endpoint is published"
+    assert "ep-rapid-resonance" not in label, "the endpoint id is published"
+    assert "us-east-1" not in label, "the region is published"
+    assert label.startswith("neon.tech"), "the provider should survive"
+    assert "#" in label, "no digest, so two archives cannot be told apart"
+
+    other = mod._provider_label("ep-other-xyz.c-2.eu-central-1.aws.neon.tech")
+    assert other != label, "two different databases produce the same label"
+    assert mod._provider_label("unknown") == "unknown"

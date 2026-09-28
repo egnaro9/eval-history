@@ -60,6 +60,23 @@ def _write(root: pathlib.Path, rel: str, payload) -> tuple[str, str]:
     return rel, hashlib.sha256(text.encode()).hexdigest()
 
 
+
+def _provider_label(hostname: str) -> str:
+    """The provider domain plus a short digest of the full host.
+
+    The manifest used to publish the whole hostname, sanitised of credentials. That is a
+    real distinction but the wrong one: the endpoint name is not a secret and is still not
+    something to put on a public page. It names a live database and its region, a reader
+    cannot verify it, and it buys them nothing.
+
+    What the field actually has to support is telling two archives apart, and a digest does
+    that without disclosing either endpoint.
+    """
+    if hostname == "unknown":
+        return hostname
+    domain = ".".join(hostname.split(".")[-2:])
+    return f"{domain}#{hashlib.sha256(hostname.encode()).hexdigest()[:8]}"
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="export", help="output directory")
@@ -179,10 +196,10 @@ def main() -> int:
             emitted += 1
         print(f"suites: {len(suites)} seen, {emitted} with a latest-comparison")
 
-    host = urlsplit(os.environ["DATABASE_URL"]).hostname or "unknown"
+    host = _provider_label(urlsplit(os.environ["DATABASE_URL"]).hostname or "unknown")
     manifest = {
         "exported_at": datetime.now(timezone.utc).isoformat(),
-        "source_host": host,          # host only; no user, password, or database name
+        "source_host": host,          # provider and a digest; never the endpoint
         "run_count": len(runs),
         "file_count": len(files),
         "files": dict(sorted(files.items())),
