@@ -5,7 +5,7 @@
 [![ci](https://github.com/egnaro9/eval-history/actions/workflows/ci.yml/badge.svg)](https://github.com/egnaro9/eval-history/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](https://www.python.org/)
 [![Postgres](https://img.shields.io/badge/Postgres-16%20%7C%2018-336791)](https://www.postgresql.org/)
-[![tests](https://img.shields.io/badge/tests-57-brightgreen)](tests)
+[![tests](https://img.shields.io/badge/tests-67-brightgreen)](tests)
 [![coverage](https://img.shields.io/badge/coverage-88%25%2B-brightgreen)](.github/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -134,7 +134,7 @@ evalhistory/
   schemas.py   Pydantic contract — accepts eval_run.json verbatim
   app.py       FastAPI: routes, auth, CORS, lifespan
   migrate.py   schema at startup: Alembic on Postgres, create_all on SQLite
-tests/         57 tests — comparison logic, API, auth, validation, cascade,
+tests/         67 tests — comparison logic, API, auth, validation, cascade,
                observability (logs/metrics/request-id), migration/model drift
                (the drift test needs Postgres; it skips on SQLite rather than
                pretending to check)
